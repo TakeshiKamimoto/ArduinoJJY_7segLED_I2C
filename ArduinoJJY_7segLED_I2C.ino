@@ -1,7 +1,6 @@
 // JJY time code decoder clock using I2C 7segment LED indicator.
 //  2022.1.25
 #include <Arduino.h>
-#include <TimerOne.h>
 #include <Wire.h>
 
 #define I2C_SLAVE_ADDRESS 0x10
@@ -42,10 +41,19 @@ void synchronizer_setup() {
   //JJYパルスをGPIO割り込みで検出するための設定
   attachInterrupt(digitalPinToInterrupt(PIN), interrupt_callback, RISING);
 
-  //タイマー割り込み設定
-  Timer1.initialize(1000000);
-  Timer1.attachInterrupt(synchronized_callback);
-  Timer1.stop();
+  //Timer1による1秒クロックのための設定
+  TCCR1A = 0;
+  TCCR1B = 0;
+  TCCR1B |= (1 << WGM12) | (1 << CS12);// CTCモード、prescale=1:256
+  OCR1A = 62500-1;// 16[us]x62500 = 1000[msec] (Output Compre Resister 1A)
+  TIMSK1 |= (1 << OCIE1A); // enable interrupt
+}
+
+void synchronizeTimer(){
+  TCNT1 = 0; //タイマカウンタをゼロリセット
+  timerIntFlag = true;
+  //同期の際にタイマカウンタをゼロリセットすることにより
+  //この瞬間はタイマ割り込みが働かないのでここで割り込み発生の代わりに割り込みフラグを立てる。
 }
 
 
@@ -60,20 +68,22 @@ void interrupt_callback() {//DI割り込みで呼ばれるルーチン。JJYパ�
     syncCheckCount++;
     
     if ( syncCheckCount > 4 ) {
-      Timer1.start();
+      synchronizeTimer(); //1秒クロックをJJYパルスに同期させる
       syncCheckCount = 0;
       //Serial.println("!Synchronized.");  
     }else {
       //Serial.print("Synchronize check count = ");
       //Serial.println(syncCheckCount);
     }
+  } else {
+    syncCheckCount = 0;
   }
 
   old_time = now;
 }
 
 //**** タイマ割り込み処理ルーチン ******************************************
-void synchronized_callback() {
+ISR (TIMER1_COMPA_vect){//Timer1の割り込みで呼ばれるルーチン
   uint32_t now = micros();
   int32_t interval = now - old_calltime;
 
@@ -88,7 +98,7 @@ void synchronized_callback() {
 
   timerIntFlag = true;
 
-  internalClockIncrement();
+
 }
 
 
@@ -107,6 +117,7 @@ int8_t get_code(void) {
     //ここからパルス信号スキャン開始
       while (!timerIntFlag) {//割り込みタイマによる開始まち
       }
+      internalClockIncrement();
 
       //現在時刻の表示
       sprintf(buf,"%d/%02d/%02d ", d_year+2000, d_month, d_day);
@@ -244,7 +255,7 @@ void decode() {
     markerOkCount++;
   }
   else {
-    Serial.println("Failed to read Position Maker P1");
+    Serial.println("Failed to read Position Maker P1(09)");
   }
   //*** 分のデコード おわり
 
@@ -269,7 +280,7 @@ void decode() {
   if( get_code() == 2 ){
     Serial.println("Position Marker P2 detected.");
   }else {
-    Serial.println("Failed to read Position Maker P2");
+    Serial.println("Failed to read Position Maker P2(19)");
   }
   //*** 時のデコード おわり
 
@@ -292,7 +303,7 @@ void decode() {
     markerOkCount++;
   }
   else {
-    Serial.println("Failed to read Position Maker P3");
+    Serial.println("Failed to read Position Maker P3(29)");
   }
   // 通算日数（前半）のデコード おわり
 
@@ -321,7 +332,7 @@ void decode() {
     markerOkCount++;
   }
   else {
-    Serial.println("Failed to read Position Maker P4");
+    Serial.println("Failed to read Position Maker P4(39)");
   }
   // 通算日数（後半）のデコード おわり
 
@@ -354,7 +365,7 @@ void decode() {
     Serial.println("Position Marker P5 detected.");
   }
   else {
-    Serial.println("Failed to read Position Maker P5");
+    Serial.println("Failed to read Position Maker P5(49)");
   }
   // 年のデコードおわり
 
@@ -374,7 +385,7 @@ void decode() {
     Serial.println("Position Marker P0 detected.");
   }
   else {
-    Serial.println("Failed to read Position Maker P0");
+    Serial.println("Failed to read Position Maker P0(59)");
   }
   // 曜日のデコードおわり
   
@@ -386,7 +397,7 @@ void decode() {
     Serial.println("Marker M detected.");
   }
   else {
-    Serial.println("Failed to read Position Maker M");
+    Serial.println("Failed to read Position Maker M(00)");
   }
 
   if( PA1 == h_parity ){
@@ -575,6 +586,8 @@ void loop(){
     if( hhdecodeOk && (mm != 0) ){//時デコード結果の反映。毎正時のときは反映しない
         hh = d_hour;
     }
+
+    ss = 0; //念のための秒合わせ
 
     //segLED_update();//デコード反映結果を表示する
     sprintf(buf,"******* %d/%02d/%02d ", 2000 + YY, MM, DD);
