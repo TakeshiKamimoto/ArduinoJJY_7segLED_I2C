@@ -389,9 +389,8 @@ void decode() {
   }
   // 曜日のデコードおわり
   
-  Serial.println("End of time code decording sequence.");
+  Serial.println("End of time code decording sequence.***********************");
 
-  markerCheckOk = (markerOkCount > 1)? true : false;//ポジションマーカー検出が2回以上できていればOKとする。
 
   if ( get_code() == 2 ){
     Serial.println("Marker M detected.");
@@ -416,6 +415,10 @@ void decode() {
     MparityCheckOk = false;
   }
 
+  //ポジションマーカー検出が2回以上できていればOKとする。
+  //ここでssがゼロでない場合はマーカー検出ズレしているとみなす。
+  markerCheckOk = (markerOkCount > 1) && (ss == 0)? true : false;
+  
 }
 
 //7segLED表示のアップデート **********************************************
@@ -587,7 +590,7 @@ void loop(){
         hh = d_hour;
     }
 
-    ss = 0; //念のための秒合わせ
+
 
     //segLED_update();//デコード反映結果を表示する
     sprintf(buf,"******* %d/%02d/%02d ", 2000 + YY, MM, DD);
